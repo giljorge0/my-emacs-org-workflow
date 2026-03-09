@@ -1,0 +1,4 @@
+init.private.el
+authinfo.gpg
+*.elc
+.DS_Store
