@@ -17,3 +17,7 @@ Notes can be captured and connected for later analysis
 ## Installation
 1. Clone this repo.
 2. Run the symlink command.
+
+
+Future directions:
+merge into the digital brain setup so that the code that implements the knowledge base there talks with the org mode setup
