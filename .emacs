@@ -274,4 +274,137 @@ Never deletes anything. Skips files if target already exists."
     (message "Done. Moved: %d  Skipped (already existed): %d" moved skipped)))
 
 (global-set-key (kbd "C-c r") #'my/simple-reorganize-memory)
+;; ============================================================
+;; DIGITAL BRAIN INTEGRATION
+;; Add this block to the end of your ~/.emacs file
+;; Adjust my/brain-project-path if your repo is elsewhere
+;; ============================================================
+
+;; Path to your Digital Brain Project repo
+(defvar my/brain-project-path
+  (expand-file-name "~/Digital-Brain-Project/")
+  "Root of the Digital Brain Project repository.")
+
+(defvar my/brain-python
+  "python3"
+  "Python executable to use. Change to a venv path if needed, e.g.:
+   ~/.virtualenvs/brain/bin/python3")
+
+;; ── Helper: run ingest as an async shell command ─────────────────────────────
+
+(defun my/brain-ingest-file (file)
+  "Ingest a single org FILE into the digital brain (async, non-blocking)."
+  (let* ((cmd (format "cd %s && %s main.py ingest %s"
+                      (shell-quote-argument my/brain-project-path)
+                      my/brain-python
+                      (shell-quote-argument (file-truename file))))
+         (buf "*brain-ingest*"))
+    (start-process-shell-command "brain-ingest" buf cmd)
+    (message "Brain: ingesting %s …" (file-name-nondirectory file))))
+
+(defun my/brain-ingest-current ()
+  "Ingest the current buffer's file into the digital brain."
+  (interactive)
+  (if (and buffer-file-name
+           (string-match-p "\\.org$" buffer-file-name))
+      (my/brain-ingest-file buffer-file-name)
+    (message "Brain: current buffer is not an .org file.")))
+
+;; ── Auto-ingest on save (only for .org files inside ~/Nextcloud/brain/) ──────
+;; This keeps the brain in sync as you write — no manual trigger needed.
+
+(defun my/brain-maybe-auto-ingest ()
+  "Auto-ingest if the saved file is inside the Nextcloud brain folder."
+  (when (and buffer-file-name
+             (string-match-p "\\.org$" buffer-file-name)
+             (string-prefix-p (expand-file-name "~/Nextcloud/brain/")
+                              (file-truename buffer-file-name)))
+    (my/brain-ingest-file buffer-file-name)))
+
+(add-hook 'after-save-hook #'my/brain-maybe-auto-ingest)
+
+;; ── Manual keybindings ────────────────────────────────────────────────────────
+
+;; F8: ingest current file into brain right now
+(global-set-key (kbd "<f8>") #'my/brain-ingest-current)
+
+;; C-c b g: run knowledge gap analysis in a terminal window
+(defun my/brain-gaps ()
+  "Run the gap agent and show results in a compilation buffer."
+  (interactive)
+  (let ((default-directory my/brain-project-path))
+    (compile (format "%s main.py gaps --no-llm" my/brain-python))
+    (message "Brain: gap analysis running…")))
+
+(global-set-key (kbd "C-c b g") #'my/brain-gaps)
+
+;; C-c b q: query the brain from Emacs (prompts in minibuffer)
+(defun my/brain-query (question)
+  "Query the digital brain with QUESTION and show answer in a buffer."
+  (interactive "sAsk your brain: ")
+  (let* ((default-directory my/brain-project-path)
+         (cmd (format "%s main.py query %s"
+                      my/brain-python
+                      (shell-quote-argument question)))
+         (buf (get-buffer-create "*brain-answer*")))
+    (with-current-buffer buf
+      (erase-buffer)
+      (insert (format "Q: %s\n\n" question))
+      (insert "Thinking…\n"))
+    (display-buffer buf)
+    (set-process-sentinel
+     (start-process-shell-command "brain-query" buf cmd)
+     (lambda (proc event)
+       (when (string= event "finished\n")
+         (with-current-buffer (process-buffer proc)
+           (goto-char (point-min))
+           (delete-line))           ; remove "Thinking…"
+         (message "Brain: answer ready."))))))
+
+(global-set-key (kbd "C-c b q") #'my/brain-query)
+
+;; C-c b a: full writing analysis (runs stylometry, opens results)
+(defun my/brain-analyze ()
+  "Run the stylometry analyzer and show the report."
+  (interactive)
+  (let ((default-directory my/brain-project-path))
+    (compile (format "%s main.py analyze" my/brain-python))
+    (message "Brain: stylometry analysis running…")))
+
+(global-set-key (kbd "C-c b a") #'my/brain-analyze)
+
+;; ── Capture template: send a quick idea straight to org-roam + brain ─────────
+;; This adds a new "b" template to your existing org-capture setup.
+;; It creates a new org-roam note AND queues it for brain ingestion on save.
+
+(with-eval-after-load 'org-capture
+  (add-to-list 'org-capture-templates
+    '("b" "Brain: atomic idea (→ org-roam)"
+      plain
+      (function
+       (lambda ()
+         ;; Create a new dated org-roam file in brain/org-roam/
+         (let* ((title (read-string "Note title: "))
+                (slug  (replace-regexp-in-string "[^a-z0-9]" "-"
+                          (downcase title)))
+                (ts    (format-time-string "%Y%m%d%H%M%S"))
+                (fname (format "%s%s-%s.org"
+                               (expand-file-name "~/Nextcloud/brain/org-roam/")
+                               ts slug)))
+           (set-buffer (find-file-noselect fname))
+           (point-max))))
+      "#+title: %(read-string \"Note title: \")\n#+filetags: :%^{Tags|philosophy|ai|books}:\n#+date: %U\n\n%?"
+      :unnarrowed t)))
+
+;; ── Keybinding summary ────────────────────────────────────────────────────────
+;; F8         → ingest current .org file into brain immediately
+;; C-c b g    → run gap analysis (shows what you're missing)
+;; C-c b q    → query the brain from Emacs
+;; C-c b a    → run stylometry / writing analysis
+;; C-c c b    → org-capture an atomic idea (creates org-roam note + auto-ingests)
+;; (auto)     → any .org file saved under ~/Nextcloud/brain/ is ingested automatically
+
+;; ============================================================
+;; END DIGITAL BRAIN INTEGRATION
+;; ============================================================
 ;; END
